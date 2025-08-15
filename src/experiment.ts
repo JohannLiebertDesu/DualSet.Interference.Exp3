@@ -47,7 +47,7 @@ export async function run({
   // Preload assets
   const preloadSlides = {
     type: preload,
-    max_load_time: 1000,
+    max_load_time: 30000,
     images: [
       "assets/instructionImages/Slide1.gif",
       "assets/instructionImages/Slide2.gif",
@@ -55,7 +55,8 @@ export async function run({
       "assets/instructionImages/Slide4.gif",
       "assets/instructionImages/Slide5.gif",
       "assets/instructionImages/Slide6.gif"
-    ]
+    ],
+    show_progress_bar: true,
   };
 
   /* pre-task screens */
