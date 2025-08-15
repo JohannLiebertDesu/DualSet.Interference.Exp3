@@ -32,6 +32,15 @@ function makeOrientationWheelForProbe(c: CircleStimulus): WheelStimulus {
   return createOrientationWheel(startX, startY, radius * 2.7, radius * 1.836, 0);
 }
 
+const signedDiff360 = (a: number, b: number) => (((a - b + 540) % 360) - 180);
+
+const hueFromHsl = (s?: string | null): number | null => {
+  if (!s) return null;
+  const m = /^hsla?\(\s*([0-9]+(?:\.[0-9]+)?)\s*,/i.exec(String(s));
+  return m ? ((parseFloat(m[1]) % 360) + 360) % 360 : null;
+};
+
+
 /* ─────────── factory ─────────── */
 export function featureRecall(
   trialID: number,
@@ -146,23 +155,95 @@ export function featureRecall(
           liveCircle.line_color = hsl;
         }
       },
-      on_finish(data: any) {
-        const t: any = jsPsych.getCurrentTrial();
-        const live = t.stim_array as any[];
+on_finish(data: any) {
+  const t: any = jsPsych.getCurrentTrial();
+  const live = t.stim_array as any[];
 
-        const filteredStimuli = live.filter(stim => stim.category !== 'customWheel');
+  // keep your snapshot
+  const filteredStimuli = live.filter(stim => stim.category !== 'customWheel');
+  const processedStimuli = filterAndMapStimuli(filteredStimuli);
+  data.stimulusResponse = processedStimuli;
 
-        const processedStimuli = filterAndMapStimuli(filteredStimuli);
-        data.stimulusResponse = processedStimuli
+  // side (your code)
+  const liveCircle = live.find(isCircleStimulus) as CircleStimulus | undefined;
+  if (liveCircle) {
+    const midpoint = screenWidth / 2;
+    data.side = liveCircle.startX < midpoint ? 'left' : 'right';
+  }
 
-        const liveCircle = live.find(isCircleStimulus) as CircleStimulus | undefined;
+  /* ── NEW: derive target (from sample phase) and selected (from recall) ── */
+  // fetch the original sample-phase stimuli for THIS logical trial
+  const sampleRows = jsPsych.data.get().filter({
+    trialID, blockID, practice, trialSegment: "displayStimuli"
+  });
+  const allSample: Stimulus[] = sampleRows.values().flatMap((r: any) => r.stimuliData);
+  const label = (probeIndex === 1) ? "tested_first" : "tested_second";
+  const origItems = allSample.filter(s => (s as any).test_status === label);
 
-        if (liveCircle) {
-          const midpoint = screenWidth / 2;
-          const side = liveCircle.startX < midpoint ? 'left' : 'right';
-          data.side = side;
+  const origLine   = origItems.find(isLineStimulus)   as LineStimulus   | undefined;
+  const origCircle = origItems.find(isCircleStimulus) as CircleStimulus | undefined;
+
+  const liveLine = live.find(isLineStimulus) as LineStimulus | undefined;
+  const liveWheel = live.find((s: any) => s.obj_type === 'manual' && s.category === 'customWheel');
+
+  // Orientation trial
+  if (liveLine || origLine) {
+    // selected angle from the line drawn on recall
+    let selDeg: number | null = null;
+    if (liveLine) {
+      const dx = (liveLine.x2 ?? liveLine.x1) - liveLine.x1;
+      const dy = (liveLine.y2 ?? liveLine.y1) - liveLine.y1;
+      selDeg = Math.atan2(dy, dx) * 180 / Math.PI;
+      if (selDeg < 0) selDeg += 360;
     }
-      },
+
+    // target angle from the original sample-phase line
+    let tgtDeg: number | null = null;
+    if (origLine) {
+      const dx0 = (origLine.x2 ?? origLine.x1) - origLine.x1;
+      const dy0 = (origLine.y2 ?? origLine.y1) - origLine.y1;
+      tgtDeg = Math.atan2(dy0, dx0) * 180 / Math.PI;
+      if (tgtDeg < 0) tgtDeg += 360;
+    }
+
+    data.response_kind = "orientation";
+    data.target_orientation_deg   = tgtDeg;
+    data.selected_orientation_deg = selDeg;
+    data.signed_error_deg     = (selDeg != null && tgtDeg != null) ? signedDiff360(selDeg, tgtDeg) : null;
+
+    // keep color-related cols null here for tidy downstream code
+    data.target_color_deg   = null;
+    data.selected_color_deg = null;
+    data.wheel_offset_deg   = null;
+
+    return;
+  }
+
+    // Color trial
+  if (origCircle || liveCircle) {
+    // selected hue from the live circle HSL string
+    const selHue = hueFromHsl(liveCircle?.fill_color as any);
+
+    // target hue from the original sample-phase circle
+    const tgtHue = hueFromHsl(origCircle?.fill_color as any);
+
+    data.response_kind       = "color";
+    data.target_color_deg    = tgtHue;
+    data.selected_color_deg  = selHue;
+    data.signed_error_deg    = (selHue != null && tgtHue != null)
+      ? signedDiff360(selHue, tgtHue)     // keep your 360° signed error
+      : null;
+
+    data.wheel_offset_deg    = liveWheel?.offset ?? null;
+
+    // null-out orientation fields
+    data.target_orientation_deg   = null;
+    data.selected_orientation_deg = null;
+    data.signed_error_deg_360     = null;
+    return;
+  }
+
+},
       /* ---------------- bookkeeping ----------------------------- */
       data: {
         trialID, blockID, practice,
