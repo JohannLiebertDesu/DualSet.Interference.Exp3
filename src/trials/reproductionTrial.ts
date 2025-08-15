@@ -13,6 +13,9 @@ import { Stimulus,
          CircleStimulus,
          WheelStimulus }                   from "../task-fun/defineStimuli";
 import { StimulusKind }                    from "../task-fun/placeStimuli";
+import { screenWidth }                     from "../task-fun/createGrid";
+import { filterAndMapStimuli }             from "../task-fun/filterStimuli";
+
 
 /* ─────────── type guards ─────────── */
 const isCircleStimulus = (s: Stimulus): s is CircleStimulus => s.obj_type === "circle";
@@ -143,13 +146,30 @@ export function featureRecall(
           liveCircle.line_color = hsl;
         }
       },
+      on_finish(data: any) {
+        const t: any = jsPsych.getCurrentTrial();
+        const live = t.stim_array as any[];
+
+        const filteredStimuli = live.filter(stim => stim.category !== 'customWheel');
+
+        const processedStimuli = filterAndMapStimuli(filteredStimuli);
+        data.stimulusResponse = processedStimuli
+
+        const liveCircle = live.find(isCircleStimulus) as CircleStimulus | undefined;
+
+        if (liveCircle) {
+          const midpoint = screenWidth / 2;
+          const side = liveCircle.startX < midpoint ? 'left' : 'right';
+          data.side = side;
+    }
+      },
       /* ---------------- bookkeeping ----------------------------- */
       data: {
         trialID, blockID, practice,
         numCircles, grouping, composition, layout,
         probeIndex,
         trialSegment: "featureRecall",
-        stimulusTypeShownFirst, forcedFirstKind
+        stimulusTypeShownFirst, forcedFirstKind, 
       }
     };
   };
